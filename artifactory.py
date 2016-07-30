@@ -34,7 +34,10 @@ import re
 import json
 import dateutil.parser
 import hashlib
-import requests.packages.urllib3 as urllib3
+try:
+    import requests.packages.urllib3 as urllib3
+except ImportError:
+    import urllib3
 try:
     import configparser
 except ImportError:
@@ -69,19 +72,22 @@ def read_config(config_path=default_config_path):
                       "Artifactory configuration file not found: '%s'" %
                       config_path)
 
-    p = configparser.ConfigParser({'username': None,
-                                   'password': None,
-                                   'verify': 'true',
-                                   'cert': None})
+    p = configparser.ConfigParser()
     p.read(config_path)
 
     result = {}
 
     for section in p.sections():
-        result[section] = {'username': p.get(section, 'username'),
-                           'password': p.get(section, 'password'),
-                           'verify': p.getboolean(section, 'verify'),
-                           'cert': p.get(section, 'cert')}
+        username = p.get(section, 'username') if p.has_option(section, 'username') else None
+        password = p.get(section, 'password') if p.has_option(section, 'password') else None
+        verify = p.getboolean(section, 'verify') if p.has_option(section, 'verify') else True
+        cert = p.get(section, 'cert') if p.has_option(section, 'cert') else None
+
+
+        result[section] = {'username': username,
+                           'password': password,
+                           'verify': verify,
+                           'cert': cert}
         # certificate path may contain '~', and we'd better expand it properly
         if result[section]['cert']:
             result[section]['cert'] = \
@@ -115,6 +121,25 @@ def without_http_prefix(url):
         return url[8:]
     return url
 
+def get_base_url(config, url):
+    """
+    Look through config and try to find best matching base for 'url'
+
+    config - result of read_config() or read_global_config()
+    url - artifactory url to search the base for
+    """
+    if not config:
+        return None
+
+    # First, try to search for the best match
+    for item in config:
+        if url.startswith(item):
+            return item
+
+    # Then search for indirect match
+    for item in config:
+        if without_http_prefix(url).startswith(without_http_prefix(item)):
+            return item
 
 def get_config_entry(config, url):
     """
@@ -144,6 +169,15 @@ def get_global_config_entry(url):
     """
     read_global_config()
     return get_config_entry(global_config, url)
+
+def get_global_base_url(url):
+    """
+    Look through global config and try to find best matching base for 'url'
+
+    url - artifactory url to search the base for
+    """
+    read_global_config()
+    return get_base_url(global_config, url)
 
 
 def md5sum(filename):
@@ -289,13 +323,18 @@ class _ArtifactoryFlavour(pathlib._Flavour):
         drv = ''
         root = ''
 
-        mark = sep+'artifactory'+sep
-        parts = part.split(mark)
+        base = get_global_base_url(part)
+        if base and without_http_prefix(part).startswith(without_http_prefix(base)):
+            mark = without_http_prefix(base).rstrip(sep)+sep
+            parts = part.split(mark)
+        else:
+            mark = sep+'artifactory'+sep
+            parts = part.split(mark)
 
         if len(parts) >= 2:
-            drv = parts[0] + mark.rstrip('/')
-            rest = '/' + mark.join(parts[1:])
-        elif part.endswith(sep+'artifactory'):
+            drv = parts[0] + mark.rstrip(sep)
+            rest = sep + mark.join(parts[1:])
+        elif part.endswith(mark.rstrip(sep)):
             drv = part
             rest = ''
         else:
@@ -304,7 +343,7 @@ class _ArtifactoryFlavour(pathlib._Flavour):
         if not rest:
             return drv, '', ''
 
-        if rest == '/':
+        if rest == sep:
             return drv, '', ''
 
         if rest.startswith(sep):
@@ -949,7 +988,7 @@ class ArtifactoryPath(pathlib.Path, PureArtifactoryPath):
         result for the special paths '.' and '..'.
         """
         for name in self._accessor.listdir(self):
-            if name in {'.', '..'}:
+            if name in ['.', '..']:
                 # Yielding a path object for these makes little sense
                 continue
             yield self._make_child_relpath(name)
