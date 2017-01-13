@@ -2,11 +2,13 @@
 
 import os
 import re
+import sys
 
 try:
     from setuptools import setup
 except ImportError:
     from distutils.core import setup
+
 
 # PyPi RST variant doesn't understand the 'code' tag. so replacing it
 # with a regular quote
@@ -44,12 +46,14 @@ setup(
         'Programming Language :: Python :: 2.7',
         'Programming Language :: Python :: 3.2',
         'Programming Language :: Python :: 3.3',
+        'Programming Language :: Python :: 3.4',
+        'Programming Language :: Python :: 3.5',
         'Topic :: Software Development :: Libraries',
         'Topic :: System :: Filesystems',
     ],
     url='http://github.com/parallels/artifactory',
     download_url='http://github.com/parallels/artifactory',
-    install_requires=['pathlib', 'requests', 'python-dateutil'],
+    install_requires=['requests', 'python-dateutil'] + ['pathlib'] if sys.version_info[0] < 3 or sys.version_info[1] < 4 else [],
     zip_safe=False,
     package_data={'': ['README.md']}
 )
